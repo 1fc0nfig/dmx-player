@@ -1,0 +1,17 @@
+{
+  "dependencies": {
+    "dmxnet": "^0.9.0",
+    "nodemon": "^3.1.0",
+    "ts-node": "^10.9.2"
+  },
+  "name": "dmx-player",
+  "version": "1.0.0",
+  "description": "node based dmx recorder/player",
+  "main": "index.ts",
+  "scripts": {
+    "dev": "nodemon --exec ts-node index.ts",
+    "start": "ts-node index.ts"
+  },
+  "author": "",
+  "license": "ISC"
+}
