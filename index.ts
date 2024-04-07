@@ -50,7 +50,10 @@ class DMXRecorder {
 
   private senders: any[];
 
-  private fps: number = 35;
+  private log: boolean = false;
+
+  private frames: Frame[] = [];
+  private playbackFPS: number = 30;
   private playing: boolean = false;
   private recording: boolean = false;
   private passthrough: boolean = true;
@@ -58,6 +61,7 @@ class DMXRecorder {
 
   private playerMeta: RecordingMetadata | undefined;
   private playerContent: Packet[] | undefined;
+  private nextClip: Packet[] | undefined;
 
   private timeout: NodeJS.Timeout | null = null;
 
@@ -74,6 +78,13 @@ class DMXRecorder {
           this.promptConfig.commands.forEach((command) => {
             console.log(`\t${command.name} - ${command.description}`);
           });
+        },
+      },
+      {
+        name: "log",
+        description: "Enables/Disable logging of raw incoming data.",
+        action: () => {
+          this.log = !this.log;
         },
       },
       {
@@ -109,7 +120,7 @@ class DMXRecorder {
       {
         name: "play",
         description: "Load and parse a recorded file.",
-        action: (filename: string) => recorder.play(filename),
+        action: (filename: string[]) => recorder.play(filename[0]),
       },
       {
         name: "end",
@@ -129,7 +140,7 @@ class DMXRecorder {
       {
         name: "fps",
         description: "Set the playback FPS.",
-        action: (fps: number) => (this.fps = fps),
+        action: (fps: number) => (this.playbackFPS = fps),
       },
       {
         name: "bk",
@@ -139,7 +150,7 @@ class DMXRecorder {
             sender.fillChannels(0, 511, 0);
           });
         },
-      }
+      },
     ],
   };
 
@@ -168,16 +179,19 @@ class DMXRecorder {
       });
 
       receiver.on("data", (data: Buffer) => {
+        const ts = new Date();
         this.checkForTimeout();
         if (this.playing) return;
+        const packet: Packet = {
+          TS: new Date(),
+          U: universe,
+          S: subnet,
+          N: net,
+          data,
+        };
+
+        if (this.log) console.log(packet);
         if (this.recording) {
-          const packet: Packet = {
-            TS: new Date(),
-            U: universe,
-            S: subnet,
-            N: net,
-            data,
-          };
           this.gzip!.write("," + JSON.stringify(packet), () => {
             this.gzip!.flush();
           });
@@ -331,113 +345,232 @@ class DMXRecorder {
   }
 
   public play(fileName: string) {
-    if (Array.isArray(fileName)) {
-      fileName = fileName[0];
-    }
-
+    // Validate file name and format
     if (!fileName) {
       console.error(
         `${new Date().toISOString()} [dmxrec] error - No file name provided.`
       );
-
-      console.log(
-        `${new Date().toISOString()} [dmxrec] info - Available files:`
-      );
-
-      const files = readdirSync(__dirname);
-      files.forEach((file) => {
-        if (file.endsWith(".dmxrec")) {
-          console.log(`\t - ${file}`);
-        }
-      });
+      this.listAvailableFiles();
       return;
-    } else if (!fileName.endsWith(".dmxrec")) {
+    }
+    if (!fileName.endsWith(".dmxrec")) {
       console.error(
-        `${new Date().toISOString()} [dmxrec] error - Invalid file format.`
+        `${new Date().toISOString()} [dmxrec] error - Invalid file format provided.`
       );
+      this.listAvailableFiles();
       return;
     }
 
+    // Construct file path and initiate stream read
     const filePath = fileName.startsWith("/")
       ? fileName
       : join(__dirname, fileName);
-    let chunks: string[] = new Array();
-    const stream = createReadStream(filePath)
+    this.readAndPlayFile(filePath);
+  }
+
+  private listAvailableFiles() {
+    console.log(`${new Date().toISOString()} [dmxrec] info - Available files:`);
+    const files = readdirSync(__dirname).filter((file) =>
+      file.endsWith(".dmxrec")
+    );
+    files.forEach((file) => console.log(`\t - ${file}`));
+  }
+
+  private readAndPlayFile(filePath: string) {
+    let chunks: string[] = [];
+
+    createReadStream(filePath)
       .pipe(createGunzip())
-      .on("error", (err) => {
+      .on("data", (chunk) => chunks.push(chunk.toString()))
+      .on("end", () => this.handleFileData(chunks))
+      .on("error", (err) =>
         console.error(
           `${new Date().toISOString()} [dmxrec] error - Error parsing data:`,
           err
-        );
-      });
-
-    stream.on("data", (chunk) => {
-      chunks.push(chunk.toString());
-    });
-
-    stream.on("end", () => {
-      const data = JSON.parse(chunks.join(""));
-      this.playerMeta = data[0];
-      this.playerContent = data.slice(1).sort((a: Packet, b: Packet) => {
-        return a.TS < b.TS ? -1 : 1;
-      });
-
-      console.log(
-        `${new Date().toISOString()} [dmxrec] info: Finished loading data.`
+        )
       );
-
-      console.log(`${new Date().toISOString()} [dmxrec] info: Playing...`);
-      this.loop();
-    });
   }
 
-  public async loop() {
-    if (!this.playerContent || !this.playerMeta) {
+  private handleFileData(chunks: string[]) {
+    const data = JSON.parse(chunks.join(""));
+    this.playerMeta = data[0]; // Assuming the first item is metadata
+    this.playerContent = data
+      .slice(1)
+      .sort((a: Packet, b: Packet) => (a.TS < b.TS ? -1 : 1));
+
+    console.log(
+      `${new Date().toISOString()} [dmxrec] info: Finished loading data.`
+    );
+    console.log(`${new Date().toISOString()} [dmxrec] info: Playing...`);
+
+    if (this.playing) {
+      this.playing = false; // Stop current playback if any
+    }
+
+    this.loop(); // Start new playback
+  }
+
+  public async loop(): Promise<void> {
+    if (!this.playerContent || !this.playerContent.length) {
       console.error(
         `${new Date().toISOString()} [dmxrec] error - No data to play.`
       );
       return;
     }
 
-    const duration = new Date(this.playerContent[this.playerContent.length - 1].TS).getTime() - new Date(this.playerContent[0].TS).getTime();
-    const recordedUniverses = new Set(this.playerContent.map((packet) => packet.U+":"+packet.S+":"+packet.N));
-
-    let frames = new Array<Frame>();
-    // group packets by size of recordedUniverses
-    for (let i = 0; i < this.playerContent.length; i+=recordedUniverses.size) {
-      const frame: Frame = {
-        delay: 0,
-        packet: []
-      }
-      for (let j = i; j < i + recordedUniverses.size; j++) {
-        frame.packet.push(this.playerContent[j])
-      }
-
-      // filter undefined packets
-      frame.packet = frame.packet.filter((packet) => packet !== undefined);
-      frames.push(frame)      
-    }
+    const recordedUniverses = new Set(
+      this.playerContent.map((packet) => `${packet.U}:${packet.S}:${packet.N}`)
+    );
+    this.frames = this.prepareFrames(recordedUniverses);
+    console.log(this.frames);
 
     this.rl?.prompt();
-
     this.playing = true;
 
-    while (this.playing) {
-      for (let i = 0; i < frames.length; i++) {
+    // Assume framesForFade is even for simplicity; adjust logic if needed for odd numbers
+    const framesForFade = this.playbackFPS * 1; // 1 second of fade
+    const endFrames = this.getCurrentClipEndFrames(framesForFade / 2);
+    const startFrames = this.getNewClipStartFrames(
+      this.playerContent,
+      framesForFade / 2
+    );
+    let interpolatedFrames = [];
+
+    // Generate interpolated frames
+    for (let i = 0; i < framesForFade; i++) {
+      let frame = this.interpolateFrames(
+        endFrames[i % endFrames.length],
+        startFrames[i % startFrames.length],
+        i,
+        framesForFade
+      );
+      interpolatedFrames.push(frame);
+    }
+
+    // Split the interpolated frames into two halves
+    const firstHalf = interpolatedFrames.slice(
+      0,
+      interpolatedFrames.length / 2
+    );
+
+    const secondHalf = interpolatedFrames.slice(interpolatedFrames.length / 2);
+
+    // Replace the start of this.frames with the second half of interpolated frames
+    for (let i = 0; i < secondHalf.length; i++) {
+      this.frames[i] = secondHalf[i];
+    }
+
+    // Replace the end of this.frames with the first half of interpolated frames
+    for (let i = 0; i < firstHalf.length; i++) {
+      this.frames[this.frames.length - firstHalf.length + i] = firstHalf[i];
+    }
+
+    // Continue with adjusted this.frames
+    while (this.playing && this.frames.length > 0) {
+      for (const frame of this.frames) {
         if (!this.playing) break;
-        const frameStart = new Date().getTime();
-        const frame = frames[i];
-        frame.packet.forEach((packet) => {
-          if (!packet) return;
-          const senders = this.senders.filter((sender) => sender.universe === packet.U);
-          senders.forEach((sender) =>
-            this.transmitData(sender, Array.from(packet.data))
-          );
-        });
-        
-        await new Promise((resolve) => setTimeout(resolve, 1000 / this.fps));
+        await this.processAndDelay(frame);
       }
     }
+  }
+
+  private prepareFrames(recordedUniverses: Set<string>): Array<Frame> {
+    let frames: Array<Frame> = [];
+
+    if (!this.playerContent || !this.playerContent.length) return [];
+    for (
+      let i = 0;
+      i < this.playerContent.length;
+      i += recordedUniverses.size
+    ) {
+      const framePackets = this.playerContent.slice(
+        i,
+        i + recordedUniverses.size
+      );
+      frames.push({ delay: 0, packet: framePackets });
+    }
+
+    return frames;
+  }
+
+  private processFrame(frame: Frame): void {
+    frame.packet.forEach((packet) => {
+      if (!packet) return;
+      const senders = this.senders.filter(
+        (sender) =>
+          sender.universe === packet.U &&
+          sender.subnet === packet.N &&
+          sender.net === packet.N
+      );
+      senders.forEach((sender) =>
+        this.transmitData(sender, Array.from(packet.data))
+      );
+    });
+  }
+
+  private getCurrentClipEndFrames(framesForFade: number): Frame[] {
+    // Directly return the last 'framesForFade' this.frames, or whatever is available if fewer.
+    return this.frames.slice(-framesForFade);
+  }
+
+  private getNewClipStartFrames(
+    newClip: Packet[],
+    framesForFade: number
+  ): Frame[] {
+    // Use a temporary variable for new this.frames to avoid modifying playerContent
+    const tempFrames = this.prepareFramesForClip(newClip);
+    return tempFrames.slice(0, framesForFade);
+  }
+
+  private prepareFramesForClip(clip: Packet[]): Frame[] {
+    const recordedUniverses = new Set(
+      clip.map((packet) => `${packet.U}:${packet.S}:${packet.N}`)
+    );
+    return this.prepareFrames(recordedUniverses);
+  }
+
+  private interpolateFrames(
+    frame1: Frame,
+    frame2: Frame,
+    step: number,
+    totalSteps: number
+  ): Frame {
+    let interpolatedFrame: Frame = { delay: 0, packet: [] };
+
+    for (let i = 0; i < frame1.packet.length; i++) {
+      let packet1 = frame1.packet[i];
+      let packet2 = frame2.packet.find(
+        (p) => p.U === packet1.U && p.S === packet1.S && p.N === packet1.N
+      );
+
+      if (!packet2) {
+        // If there's no matching packet in frame2, you might want to handle this case,
+        // e.g., by skipping this packet or using packet1's data directly.
+        continue;
+      }
+
+      let interpolatedPacket: Packet = {
+        TS: new Date(), // or some interpolation of TS if needed
+        U: packet1.U,
+        S: packet1.S,
+        N: packet1.N,
+        data: Buffer.alloc(packet1.data.length),
+      };
+
+      for (let j = 0; j < packet1.data.length; j++) {
+        // Linear interpolation of DMX channel values, ensuring the result is rounded
+        // and remains within the 0-255 range valid for DMX data.
+        let value1 = packet1.data[j];
+        let value2 = packet2.data[j];
+        interpolatedPacket.data[j] = Math.round(
+          value1 + (value2 - value1) * (step / totalSteps)
+        );
+      }
+
+      interpolatedFrame.packet.push(interpolatedPacket);
+    }
+
+    return interpolatedFrame;
   }
 
   public highLight(universe: number | number[]) {
@@ -504,6 +637,17 @@ class DMXRecorder {
       );
     }
   }
+
+  private async processAndDelay(frame: Frame): Promise<void> {
+    const frameStart = new Date().getTime();
+    this.processFrame(frame);
+    const frameProcessingTime = new Date().getTime() - frameStart;
+
+    const targetFrameDuration = 1000 / this.playbackFPS;
+    const delay = Math.max(0, targetFrameDuration - frameProcessingTime);
+
+    await new Promise((resolve) => setTimeout(resolve, delay));
+  }
 }
 
 // Example usage
@@ -527,5 +671,4 @@ const recorder = new DMXRecorder(
   config
 );
 
-recorder.play("2024-04-04-23-07-07.dmxrec");
-
+recorder.play("2024-04-05-19-47-40.dmxrec");
