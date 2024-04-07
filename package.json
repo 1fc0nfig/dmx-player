@@ -1,6 +1,6 @@
 {
   "dependencies": {
-    "dmxnet": "github:1fc0nfig/dmxnet",
+    "dmxnet": "github:1fc0nfig/dmxnet#95b2ca1c0215aad2647cc65303410ac409682dcd",
     "nodemon": "^3.1.0",
     "ts-node": "^10.9.2"
   },

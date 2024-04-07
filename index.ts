@@ -85,6 +85,12 @@ class DMXRecorder {
         name: "log",
         description: "Enables/Disable logging of raw incoming data.",
         action: () => {
+          console.log(
+            `${new Date().toISOString()} [dmxrec] info: Logging raw data: ${
+              !this.verbose
+            }`
+          );
+
           this.verbose = !this.verbose;
         },
       },
@@ -188,9 +194,6 @@ class DMXRecorder {
       }
     };
 
-    console.log(this.dmxnet.__proto__);
-    
-
     try {
       this.senders = this.createSenders();
       this.createListeners();
@@ -233,11 +236,7 @@ class DMXRecorder {
 
           if (this.verbose) {
             console.log(
-              `${new Date().toISOString()} [dmxrec] verbose: ${
-                receiver.ip
-              } - UNI ${universe} - SUB ${subnet} - NET ${net} - ${Array.from(
-                data
-              ).join(", ")}`
+              `${new Date().toISOString()} [dmxrec] verbose: DATA: UNI ${universe} - SUB ${subnet} - NET ${net}`
             );
           }
           if (this.recording) {
@@ -286,7 +285,7 @@ class DMXRecorder {
                 subnet: subnet,
                 net: net,
               });
-              
+
               return sender;
             } catch (error) {
               console.error(
@@ -487,7 +486,6 @@ class DMXRecorder {
       this.playerContent.map((packet) => `${packet.U}:${packet.S}:${packet.N}`)
     );
     this.frames = this.prepareFrames(recordedUniverses);
-    console.log(this.frames);
 
     this.rl?.prompt();
     this.playing = true;
@@ -736,4 +734,4 @@ const recorder = new DMXRecorder(
   config
 );
 
-recorder.play("2024-04-05-19-47-40.dmxrec");
+// recorder.play("2024-04-05-19-47-40.dmxrec");
