@@ -1,4 +1,5 @@
 import dmxlib from "dmxnet";
+import * as dmxnet from "dmxnet";
 import readline from "readline";
 import { createWriteStream, createReadStream } from "fs";
 import { createGzip, createGunzip } from "zlib";
@@ -50,7 +51,7 @@ class DMXRecorder {
 
   private senders: any[];
 
-  private log: boolean = false;
+  private verbose: boolean = false;
 
   private frames: Frame[] = [];
   private playbackFPS: number = 30;
@@ -84,7 +85,7 @@ class DMXRecorder {
         name: "log",
         description: "Enables/Disable logging of raw incoming data.",
         action: () => {
-          this.log = !this.log;
+          this.verbose = !this.verbose;
         },
       },
       {
@@ -159,8 +160,47 @@ class DMXRecorder {
     this.outputs = config.outputs;
     this.dmxnet = new dmxlib.dmxnet({ sName, lName });
 
-    this.senders = this.createSenders();
-    this.createListeners();
+    this.dmxnet.socket.on("error", (err: any) => {
+      console.error(
+        `${new Date().toISOString()} [dmxrec] error: Error in socket:`,
+        err
+      );
+    });
+
+    this.dmxnet.logger = {
+      info: (msg: string) => {
+        // console.log(`${new Date().toISOString()} [dmxrec] info: ${msg}`);
+      },
+      warn: (msg: string) => {
+        // console.log(`${new Date().toISOString()} [dmxrec] warn: ${msg}`);
+      },
+      error: (msg: string) => {
+        // console.log(`${new Date().toISOString()} [dmxrec] error: ${msg}`);
+      },
+      debug: (msg: string) => {
+        // console.log(`${new Date().toISOString()} [dmxrec] debug: ${msg}`);
+      },
+      silly: (msg: string) => {
+        // console.log(`${new Date().toISOString()} [dmxrec] silly: ${msg}`);
+      },
+      verbose: (msg: string) => {
+        // console.log(`${new Date().toISOString()} [dmxrec] verbose: ${msg}`);
+      }
+    };
+
+    console.log(this.dmxnet.__proto__);
+    
+
+    try {
+      this.senders = this.createSenders();
+      this.createListeners();
+    } catch (error) {
+      this.senders = [];
+      console.error(
+        `${new Date().toISOString()} [dmxrec] error: Error initializing:`,
+        error
+      );
+    }
 
     this.checkForTimeout();
     this.shell();
@@ -172,39 +212,54 @@ class DMXRecorder {
       const localUniverse = universe % 16;
       const net = 0;
 
-      const receiver = this.dmxnet.newReceiver({
-        universe: localUniverse,
-        subnet: subnet,
-        net: net,
-      });
+      try {
+        const receiver = this.dmxnet.newReceiver({
+          universe: localUniverse,
+          subnet: subnet,
+          net: net,
+        });
 
-      receiver.on("data", (data: Buffer) => {
-        const ts = new Date();
-        this.checkForTimeout();
-        if (this.playing) return;
-        const packet: Packet = {
-          TS: new Date(),
-          U: universe,
-          S: subnet,
-          N: net,
-          data,
-        };
+        receiver.on("data", (data: Buffer) => {
+          const ts = new Date();
+          this.checkForTimeout();
+          if (this.playing) return;
+          const packet: Packet = {
+            TS: new Date(),
+            U: universe,
+            S: subnet,
+            N: net,
+            data,
+          };
 
-        if (this.log) console.log(packet);
-        if (this.recording) {
-          this.gzip!.write("," + JSON.stringify(packet), () => {
-            this.gzip!.flush();
-          });
-        }
+          if (this.verbose) {
+            console.log(
+              `${new Date().toISOString()} [dmxrec] verbose: ${
+                receiver.ip
+              } - UNI ${universe} - SUB ${subnet} - NET ${net} - ${Array.from(
+                data
+              ).join(", ")}`
+            );
+          }
+          if (this.recording) {
+            this.gzip!.write("," + JSON.stringify(packet), () => {
+              this.gzip!.flush();
+            });
+          }
 
-        if (this.passthrough) {
-          this.senders.forEach((sender) => {
-            if (sender.universe === universe) {
-              this.transmitData(sender, Array.from(data));
-            }
-          });
-        }
-      });
+          if (this.passthrough) {
+            this.senders.forEach((sender) => {
+              if (sender.universe === universe) {
+                this.transmitData(sender, Array.from(data));
+              }
+            });
+          }
+        });
+      } catch (error) {
+        console.error(
+          `${new Date().toISOString()} [dmxrec] error: Error creating listeners:`,
+          error
+        );
+      }
     });
 
     console.log(
@@ -223,13 +278,23 @@ class DMXRecorder {
             const localUniverse = universe % 16;
             const net = 0;
 
-            return this.dmxnet.newSender({
-              ip: output.ip,
-              port: 6454,
-              universe: localUniverse,
-              subnet: subnet,
-              net: net,
-            });
+            try {
+              const sender = this.dmxnet.newSender({
+                ip: output.ip,
+                port: 6454,
+                universe: localUniverse,
+                subnet: subnet,
+                net: net,
+              });
+              
+              return sender;
+            } catch (error) {
+              console.error(
+                `${new Date().toISOString()} [dmxrec] error: Error creating sender:`,
+                error
+              );
+              return null;
+            }
           });
         })
         .flat();
