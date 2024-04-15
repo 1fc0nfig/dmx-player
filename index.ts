@@ -605,7 +605,7 @@ class DMXRecorder {
       this.transmitData(sender, data);
       const ts2 = new Date().getTime();
       const pbd = delays[i] - (ts2 - ts);
-      if (pbd > 2) await new Promise((resolve) => setTimeout(resolve, pbd));
+      if (pbd > 2) await new Promise((resolve) => setTimeout(resolve, pbd - 2));
     }
   }
 
@@ -693,11 +693,11 @@ class DMXRecorder {
 
 // Example usage
 const config: PlayerConfig = {
-  universes: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+  universes: [0, 1, 2, 3, 4, 5],
   outputs: [
     {
       ip: "192.168.0.21",
-      universe: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+      universe: [0, 1, 2, 3, 4, 5],
     }
   ],
 };
