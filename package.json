@@ -10,7 +10,8 @@
   "main": "index.ts",
   "scripts": {
     "dev": "nodemon --exec ts-node index.ts",
-    "start": "ts-node index.ts"
+    "start": "ts-node index.ts",
+    "play": "ts-node player.ts"
   },
   "author": "Matyas Cerny",
   "license": "ISC"

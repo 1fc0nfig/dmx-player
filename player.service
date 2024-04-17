@@ -1,0 +1,15 @@
+[Unit]
+Description=DMX Player
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/dmx-player
+ExecStart=/usr/bin/npm run play
+Restart=always
+Environment=PATH=/usr/bin:/usr/local/bin
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target

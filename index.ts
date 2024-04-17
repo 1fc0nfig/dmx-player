@@ -25,7 +25,7 @@ type Frame = {
   packet: Packet[];
 };
 
-type PlayerConfig = {
+export type PlayerConfig = {
   universes: number[];
   outputs: {
     ip: string;
@@ -41,7 +41,7 @@ type PromptConfig = {
   }[];
 };
 
-class DMXRecorder {
+export class DMXRecorder {
   private dmxnet: any;
   private inputUnis: number[];
   private outputs: {
@@ -116,17 +116,17 @@ class DMXRecorder {
       {
         name: "record",
         description: "Start recording DMX data.",
-        action: () => recorder.record(),
+        action: () => this.record(),
       },
       {
         name: "stop",
         description: "Stop recording DMX data.",
-        action: () => recorder.close(),
+        action: () => this.close(),
       },
       {
         name: "play",
         description: "Load and parse a recorded file.",
-        action: (filename: string[]) => recorder.play(filename[0]),
+        action: (filename: string[]) => this.play(filename[0]),
       },
       {
         name: "end",
@@ -136,7 +136,7 @@ class DMXRecorder {
       {
         name: "highlight",
         description: "Blink lights on the specified universe.",
-        action: (universe: number) => recorder.highLight(universe),
+        action: (universe: number) => this.highLight(universe),
       },
       {
         name: "passthrough",
@@ -690,20 +690,3 @@ class DMXRecorder {
     }
   }
 }
-
-// Example usage
-const config: PlayerConfig = {
-  universes: [0, 1, 2, 3, 4, 5],
-  outputs: [
-    {
-      ip: "192.168.0.21",
-      universe: [0, 1, 2, 3, 4, 5],
-    }
-  ],
-};
-
-const recorder = new DMXRecorder(
-  "Safecontrol DMX",
-  "Safecontrol DMX - ArtNet Transceiver",
-  config
-);
